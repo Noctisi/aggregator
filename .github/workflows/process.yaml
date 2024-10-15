@@ -1,8 +1,8 @@
 name: Process
 on:
   schedule:
-    - cron: "05 03 * * *"
-    - cron: "05 11 * * *"
+    - cron: "5 19 * * *"  # 对应 03:05 CST
+    - cron: "5 3 * * *"   # 对应 11:05 CST
   workflow_dispatch:
 
 env:
