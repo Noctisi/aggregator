@@ -1,8 +1,8 @@
 name: Collect
 on:
-  # executed at 02:00
+  # 执行时间调整为中国时区的02:00 CST，对应 UTC 的18:00
   schedule:
-    - cron: "0 2 * * *"
+    - cron: "0 18 * * *"
   workflow_dispatch:
 
 concurrency:
