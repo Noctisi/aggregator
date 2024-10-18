@@ -54,19 +54,29 @@ class PushTo(object):
         if not self.validate(push_conf=push_conf):
             logger.error(f"[PushError] push config is invalidate, domain: {self.name}")
             return False
-
-        if push_conf.get("local", ""):
-            self._storage(content=content, filename=push_conf.get("local"))
-
+    
         url, data, headers = self._generate_payload(content=content, push_conf=push_conf)
         payload = kwargs.get("payload", None)
         if payload and isinstance(payload, dict):
             try:
-                data = json.dumps(payload).encode("UTF8")
-            except:
-                logger.error(f"[PushError] invalid payload, domain: {self.name}")
+                # 获取现有的 Gist 内容
+                existing_content = self._get_existing_gist(push_conf["gistid"])
+                
+                # 合并现有内容和新内容
+                for filename, file_content in payload["files"].items():
+                    if filename not in existing_content or file_content.get("content"):
+                        existing_content[filename] = file_content
+                    else:
+                        existing_content[filename]["content"] = file_content.get("content", existing_content[filename]["content"])
+                
+                data = json.dumps({"files": existing_content}).encode("UTF8")
+            except json.JSONDecodeError as e:
+                logger.error(f"[PushError] invalid JSON payload, domain: {self.name}, error: {str(e)}")
                 return False
-
+            except Exception as e:
+                logger.error(f"[PushError] failed to merge existing content, domain: {self.name}, error: {str(e)}")
+                return False
+    
         try:
             request = urllib.request.Request(url=url, data=data, headers=headers, method=self.method)
             response = urllib.request.urlopen(request, timeout=60, context=utils.CTX)
@@ -74,21 +84,37 @@ class PushTo(object):
                 logger.info(f"[PushSuccess] push subscribes information to {self.name} successed, group=[{group}]")
                 return True
             else:
-                logger.info(
-                    "[PushError]: group=[{}], name: {}, error message: \n{}".format(
-                        group, self.name, response.read().decode("unicode_escape")
-                    )
-                )
+                error_msg = response.read().decode("unicode_escape")
+                logger.error(f"[PushError]: group=[{group}], name: {self.name}, status code: {response.getcode()}, error message: {error_msg}")
                 return False
-
-        except Exception:
-            self._error_handler(group=group)
-
-            retry -= 1
-            if retry > 0:
-                return self.push_to(content, push_conf, group, retry)
-
+        except urllib.error.HTTPError as e:
+            logger.error(f"[PushError]: group=[{group}], name: {self.name}, HTTP Error: {e.code}, reason: {e.reason}")
+            if e.code == 422:
+                logger.error(f"Request body: {data.decode('utf-8')}")
             return False
+        except Exception as e:
+            logger.error(f"[PushError]: group=[{group}], name: {self.name}, error: {str(e)}")
+            return False
+    
+    def _get_existing_gist(self, gist_id: str) -> dict:
+        url = f"{self.api_address}/{gist_id}"
+        headers = {
+            "Accept": "application/vnd.github+json",
+            "Authorization": f"Bearer {self.token}",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "User-Agent": utils.USER_AGENT,
+        }
+        
+        try:
+            request = urllib.request.Request(url=url, headers=headers)
+            response = urllib.request.urlopen(request, timeout=60, context=utils.CTX)
+            if response.getcode() == 200:
+                content = json.loads(response.read().decode("utf-8"))
+                return content.get("files", {})
+        except Exception as e:
+            logger.error(f"[GetGistError]: Failed to get existing Gist content, error: {str(e)}")
+        
+        return {}
 
     def _is_success(self, response: HTTPResponse) -> bool:
         return response and response.getcode() == 200
